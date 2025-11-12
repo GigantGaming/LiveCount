@@ -1,62 +1,53 @@
-from flask import Flask, request, jsonify
+from flask import Flask, render_template, request, redirect
 import sqlite3
 import os
 
 app = Flask(__name__)
 
-# Database path
+# Database file path
 DB_PATH = os.path.join(os.getcwd(), "database.db")
 
-# Function to create table if not exists
+# Create table if not exists
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''
-        CREATE TABLE IF NOT EXISTS ip_logs (
+        CREATE TABLE IF NOT EXISTS comments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ip_address TEXT,
-            user_agent TEXT,
+            name TEXT NOT NULL,
+            comment TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     conn.commit()
     conn.close()
 
-# Call init_db when app starts
-init_db()
+init_db()  # Initialize database
 
-@app.route("/")
+@app.route("/", methods=["GET", "POST"])
 def home():
-    return "Welcome to IP Logger Flask App!"
+    if request.method == "POST":
+        name = request.form.get("name")
+        comment = request.form.get("comment")
 
-@app.route("/log-ip", methods=["GET", "POST"])
-def log_ip():
-    # Get client IP (Render proxy ke liye X-Forwarded-For check)
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    user_agent = request.headers.get("User-Agent", "Unknown")
+        # Validation (avoid blank)
+        if name.strip() and comment.strip():
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute("INSERT INTO comments (name, comment) VALUES (?, ?)", (name, comment))
+            conn.commit()
+            conn.close()
 
-    # Insert IP into SQLite
+        return redirect("/")  # refresh page
+
+    # Show all comments
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("INSERT INTO ip_logs (ip_address, user_agent) VALUES (?, ?)", (ip, user_agent))
-    conn.commit()
+    c.execute("SELECT name, comment, created_at FROM comments ORDER BY id DESC")
+    all_comments = c.fetchall()
     conn.close()
 
-    return jsonify({
-        "success": True,
-        "ip": ip,
-        "message": "IP stored successfully!"
-    })
-
-@app.route("/show-ips")
-def show_ips():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT * FROM ip_logs ORDER BY id DESC LIMIT 10")
-    rows = c.fetchall()
-    conn.close()
-
-    return jsonify(rows)
+    return render_template("index.html", comments=all_comments)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
